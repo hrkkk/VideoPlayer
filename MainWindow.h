@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <string>
+#include "PlayerContext.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -16,9 +17,7 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
-
-    void loop(std::string fileName);
+    ~MainWindow();   
 
 private:
     Ui::MainWindow *ui;

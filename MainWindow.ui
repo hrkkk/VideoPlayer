@@ -16,11 +16,89 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout_2">
     <item>
-     <widget class="QGraphicsView" name="graphicsView"/>
-    </item>
-    <item>
      <widget class="QWidget" name="widget" native="true">
-      <layout class="QVBoxLayout" name="verticalLayout">
+      <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0">
+       <item>
+        <widget class="QLabel" name="screen">
+         <layout class="QVBoxLayout" name="verticalLayout_3">
+          <item>
+           <layout class="QGridLayout" name="gridLayout_2">
+            <item row="0" column="0">
+             <layout class="QGridLayout" name="gridLayout">
+              <item row="0" column="0">
+               <widget class="QLabel" name="label_4">
+                <property name="styleSheet">
+                 <string notr="true">color: rgb(255, 0, 0);</string>
+                </property>
+                <property name="text">
+                 <string>已解码帧数：</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="label_5">
+                <property name="styleSheet">
+                 <string notr="true">color: rgb(170, 0, 0);
+color: rgb(255, 0, 0);</string>
+                </property>
+                <property name="text">
+                 <string>当前播放帧数：</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLabel" name="decodeNum">
+                <property name="styleSheet">
+                 <string notr="true">color: rgb(255, 0, 0);</string>
+                </property>
+                <property name="text">
+                 <string>TextLabel</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLabel" name="displayNum">
+                <property name="styleSheet">
+                 <string notr="true">color: rgb(255, 0, 0);</string>
+                </property>
+                <property name="text">
+                 <string>TextLabel</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="1" column="0">
+             <spacer name="verticalSpacer">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>40</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item row="0" column="1">
+             <spacer name="horizontalSpacer_2">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
        <item>
         <widget class="QProgressBar" name="progressBar">
          <property name="maximumSize">
@@ -29,8 +107,11 @@
            <height>5</height>
           </size>
          </property>
+         <property name="maximum">
+          <number>362</number>
+         </property>
          <property name="value">
-          <number>24</number>
+          <number>0</number>
          </property>
          <property name="textVisible">
           <bool>false</bool>
