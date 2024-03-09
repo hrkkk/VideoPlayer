@@ -13,8 +13,10 @@ extern "C" {
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <condition_variable>
 
 #include "PlayerContext.h"
+#include "AudioPlayer.h"
 
 #include <QImage>
 #include <QPicture>
@@ -23,14 +25,19 @@ extern "C" {
 
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 using AVFramePtr = std::shared_ptr<AVFrame>;
+using PlayerContextPtr = std::shared_ptr<PlayerContext>;
 
 std::queue<AVFramePtr> displayQueue;
-std::mutex mux;
+std::queue<AVFramePtr> playQueue;
+std::mutex mtx;
 std::atomic<int> decodeCount(0);
 std::atomic<int> displayCount(0);
+std::condition_variable cond;
 
 void start(PlayerContext* playerCtx);
 int decodeVideoPacket(PlayerContext* playerCtx);
+int decodeAudioPacket(PlayerContext* playerCtx);
+int getPacket(PlayerContext* playerCtx);
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -38,21 +45,37 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    // 创建子线程
-    std::thread subThread([]() {
-        std::string filePath = "H:/DataCenter/Photo/#2 Photo/other/01e5ae0031d7b48b010376038d2fb17195_258.mp4";
-        PlayerContext* playerContext = new PlayerContext();
-        playerContext->m_filename = filePath;
 
-        start(playerContext);
+    PlayerContext* playerCtx = new PlayerContext();
 
-        delete playerContext;
-    });
-    subThread.detach();
+    std::string filePath = "H:/DataCenter/Photo/#2 Photo/other/01e5abbe8cd9b177010370038d26e57967_258.mp4";
+    playerCtx->m_filename = filePath;
+    start(playerCtx);
+
+
+    // 解封装线程
+    std::thread demuxThread([](PlayerContext* playerCtx) {
+        getPacket(playerCtx);
+    }, playerCtx);
+    demuxThread.detach();
+
+    // 视频帧解码线程
+    std::thread videoDecodeThread([](PlayerContext* playerCtx) {
+        decodeVideoPacket(playerCtx);
+    }, playerCtx);
+    videoDecodeThread.detach();
+
+    // 音频帧解码线程
+    std::thread audioDecodeThread([](PlayerContext* playerCtx) {
+        decodeAudioPacket(playerCtx);
+    }, playerCtx);
+    audioDecodeThread.detach();
+
 
     QTimer* timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [&]() {
-        std::unique_lock<std::mutex> lock(mux);
+        std::lock_guard<std::mutex> lock(mtx);
+
         // 如果有待播放的视频帧
         if (!displayQueue.empty()) {
             // 取出图像
@@ -74,12 +97,31 @@ MainWindow::MainWindow(QWidget *parent)
             ui->displayNum->setText(QString::number(displayCount.load()));
             ui->progressBar->setValue(displayCount.load());
 
-            std::cout << "DisplayCount: " << displayCount << std::endl;
+            // std::cout << "DisplayCount: " << displayCount << std::endl;
             // std::cout << "Display one frame" << std::endl;
         }
     });
     timer->setInterval(40);
     timer->start();
+
+
+    AudioPlayer* audioPlayer = new AudioPlayer();
+    QTimer* audioTimer = new QTimer(this);
+    connect(audioTimer, &QTimer::timeout, this, [=]() {
+        std::unique_lock<std::mutex> lock(mtx);
+
+        // 如果有待播放的音频帧
+        if (!playQueue.empty()) {
+            // 取出音频
+            AVFramePtr frame = playQueue.front();
+            playQueue.pop();
+
+            // 播放
+            audioPlayer->appendPCMData(frame.get());
+        }
+    });
+    audioTimer->setInterval(100);
+    audioTimer->start();
 }
 
 MainWindow::~MainWindow()
@@ -123,7 +165,12 @@ int openStream(PlayerContext* playerCtx, int mediaType)
         playerCtx->m_audioStreamIndex = streamIndex;
         playerCtx->m_audioCodecCtx = codecCtx;
         playerCtx->m_audioStream = formatCtx->streams[streamIndex];
-        playerCtx->m_audioSwrCtx = swr_alloc();
+        playerCtx->m_audioSwrCtx = NULL;
+        AVChannelLayout outChannel;
+        av_channel_layout_default(&outChannel, 2);
+        swr_alloc_set_opts2(&playerCtx->m_audioSwrCtx, &outChannel, AV_SAMPLE_FMT_S16, 48000,
+                            &codecCtx->ch_layout, codecCtx->sample_fmt, codecCtx->sample_rate, 0, NULL);
+        swr_init(playerCtx->m_audioSwrCtx);
         break;
     case AVMEDIA_TYPE_VIDEO:
         playerCtx->m_videoStreamIndex = streamIndex;
@@ -141,33 +188,45 @@ int openStream(PlayerContext* playerCtx, int mediaType)
 
 int getPacket(PlayerContext* playerCtx)
 {
-    // AVPacket* packet = av_packet_alloc();
-    AVPacketPtr packet(av_packet_alloc(), [](AVPacket* ptr) {
-        std::cout << "Packet free" << std::endl;
-        av_packet_free(&ptr);
-    });
-
     while (true) {
+        std::lock_guard<std::mutex> lock(mtx);
+
+        if (playerCtx->m_audioQueue.size() > 50 || playerCtx->m_videoQueue.size() > 50) {
+            continue;
+        }
+
+        AVPacketPtr packet(av_packet_alloc(), [](AVPacket* ptr) {
+            // std::cout << "Packet free" << std::endl;
+            av_packet_free(&ptr);
+        });
+
         if (av_read_frame(playerCtx->m_formatCtx, packet.get()) < 0) {
             std::cout << "Read frame error." << std::endl;
             break;
         }
 
         if (packet->stream_index == playerCtx->m_videoStreamIndex) {
-            // 添加到视频包队列
-            playerCtx->m_videoQueue.pushPacket(packet.get());
-            // std::cout << "Read one video frame" << std::endl;
+            {
+                // 添加到视频包队列
+                playerCtx->m_videoQueue.pushPacket(packet);
 
-            decodeVideoPacket(playerCtx);
+                cond.notify_one();
+
+                // std::cout << "Send one packet" << packet << std::endl;
+            }
         } else if (packet->stream_index == playerCtx->m_audioStreamIndex) {
-            // 添加到音频包队列
-            playerCtx->m_audioQueue.pushPacket(packet.get());
+            {
+                // 添加到音频包队列
+                playerCtx->m_audioQueue.pushPacket(packet);
+
+                cond.notify_one();
+
+                // std::cout << "Get one packet" << std::endl;
+            }
         } else {
             av_packet_unref(packet.get());
         }
     }
-
-    // av_packet_free(&packet);
 
     return 0;
 }
@@ -178,28 +237,30 @@ int decodeVideoPacket(PlayerContext* playerCtx)
     AVFrame* frame = av_frame_alloc();
 
     while (true) {
-        if (playerCtx->m_videoQueue.isEmpty()) {
-            break;
-        }
+        std::unique_lock<std::mutex> lock(mtx);
+        cond.wait(lock, [=]{
+            return !playerCtx->m_videoQueue.isEmpty();
+        });
 
         // 从视频队列中获取一包数据
-        AVPacket* packet = playerCtx->m_videoQueue.popPacket();
+        AVPacketPtr packet = playerCtx->m_videoQueue.popPacket();
 
         // 解码该数据包
-        int ret = avcodec_send_packet(codecCtx, packet);
+        int ret = avcodec_send_packet(codecCtx, packet.get());
         if (ret == 0) {
             ret = avcodec_receive_frame(codecCtx, frame);
         }
 
+        // 处理该帧图像
         if (ret == 0) {
             decodeCount.fetch_add(1);
-            std::cout << "Frame Num: " << decodeCount.load() << std::endl;
+            // std::cout << "Frame Num: " << decodeCount.load() << std::endl;
+
             // 创建一个用于存储转换后的 RGB 帧的 AVFrame 对象
-            // AVFrame* frameRGB = av_frame_alloc();
-            AVFramePtr frameRGBPtr(av_frame_alloc(), [](AVFrame* ptr) {
+            AVFramePtr frameRGB(av_frame_alloc(), [](AVFrame* ptr) {
+                // std::cout << "FrameRGB free" << std::endl;
                 av_frame_free(&ptr);
             });
-            AVFrame* frameRGB = frameRGBPtr.get();
 
             // 设置 RGB 帧的参数
             frameRGB->format = AV_PIX_FMT_RGB24; // 设置为 RGB 格式
@@ -207,41 +268,97 @@ int decodeVideoPacket(PlayerContext* playerCtx)
             frameRGB->height = frame->height;
 
             // 分配 RGB 帧的数据空间
-            ret = av_frame_get_buffer(frameRGB, 0);
+            av_frame_get_buffer(frameRGB.get(), 0);
 
             // 执行图像转换
-            ret = sws_scale(playerCtx->m_videoSwsCtx, frame->data, frame->linesize, 0, frameRGB->height,
-                            frameRGB->data, frameRGB->linesize);
+            sws_scale(playerCtx->m_videoSwsCtx, frame->data, frame->linesize, 0, frameRGB->height,
+                      frameRGB->data, frameRGB->linesize);
 
             // 使用转换后的 RGB 帧进行后续处理
             // std::cout << "Decode one video frame" << std::endl;
 
             {
-                std::unique_lock<std::mutex> lock(mux);
                 // 将处理后的图像放入显示队列
-                displayQueue.push(frameRGBPtr);
+                displayQueue.push(frameRGB);
+
+                // std::cout << "Decode one frame" << std::endl;
             }
         }
+
+        av_frame_unref(frame);
     }
 
     av_frame_free(&frame);
-    // av_frame_free(&frameRGB);
-    // av_packet_free(&packet);
 
     return 0;
 }
 
 int decodeAudioPacket(PlayerContext* playerCtx)
 {
+    AVCodecContext* codecCtx = playerCtx->m_audioCodecCtx;
+    AVFrame* frame = av_frame_alloc();
+
+    while (true) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cond.wait(lock, [=]{
+            return !playerCtx->m_audioQueue.isEmpty();
+        });
+
+        // 从音频队列中取出一包数据
+        AVPacketPtr packet = playerCtx->m_audioQueue.popPacket();
+
+        // 解码
+        int ret = avcodec_send_packet(codecCtx, packet.get());
+        if (ret == 0) {
+            ret = avcodec_receive_frame(codecCtx, frame);
+        }
+
+        // 处理该帧音频
+        if (ret == 0) {
+            // 设置输入和输出参数
+            int srcRate = frame->sample_rate;
+            int dstRate = 48000;
+            int srcChannels = av_get_channel_layout_nb_channels(frame->channel_layout);
+            int dstChannels = 2;
+            enum AVSampleFormat srcSampleFmt = (AVSampleFormat)frame->format;
+            enum AVSampleFormat dstSampleFmt = AV_SAMPLE_FMT_S16;
+
+            // 计算输出的样本数量
+            int dstSamplesNum = av_rescale_rnd(swr_get_delay(playerCtx->m_audioSwrCtx, srcRate) + frame->nb_samples,
+                                               dstRate,
+                                               srcRate,
+                                               AV_ROUND_UP);
+
+            // 创建FramePCM
+            AVFramePtr framePCM(av_frame_alloc(), [](AVFrame* ptr) {
+                std::cout << "FramePCM free" << std::endl;
+                av_frame_free(&ptr);
+            });
+
+            // 填充输出的Frame
+            framePCM->sample_rate = dstRate;
+            framePCM->format = dstSampleFmt;
+            framePCM->channels = dstChannels;
+            framePCM->nb_samples = dstSamplesNum;
+
+            // 分配输出的样本缓冲区
+            av_frame_get_buffer(framePCM.get(), 0);
+
+            // 重采样
+            swr_convert_frame(playerCtx->m_audioSwrCtx, framePCM.get(), frame);
+
+            // 将处理后的音频放入播放队列
+            playQueue.push(framePCM);
+        }
+        av_frame_unref(frame);
+    }
+    av_frame_free(&frame);
+
     return 0;
 }
 
 void start(PlayerContext* playerCtx)
 {
-    // 1. 初始化FFmpeg库
-    // av_register_all();
-
-    // 2. 打开视频文件
     AVFormatContext* formatCtx = avformat_alloc_context();
     if (avformat_open_input(&formatCtx, playerCtx->m_filename.c_str(), NULL, NULL) != 0) {
         qDebug() << "Can not open video file";
@@ -261,7 +378,7 @@ void start(PlayerContext* playerCtx)
     // av_log_set_callback(customLogCallback);
     // av_log_set_level(AV_LOG_INFO);
     // 输出音视频文件的详细信息到自定义输出流
-    av_dump_format(formatCtx, -1, playerCtx->m_filename.c_str(), 0);
+    // av_dump_format(formatCtx, -1, playerCtx->m_filename.c_str(), 0);
     // std::cout << ss.str() << std::endl;
 
     if (openStream(playerCtx, AVMEDIA_TYPE_AUDIO) < 0) {
@@ -273,33 +390,4 @@ void start(PlayerContext* playerCtx)
         std::cout << "Open video stream failed.\r\n";
         return;
     }
-
-    // 开始循环
-    getPacket(playerCtx);
-
-    // 3. 获取视频流信息
-
-    // 4. 查找视频流
-
-    // 5. 查找视频解码器
-
-    // 6. 创建解码器上下文
-
-    // 7. 打开解码器
-
-
-    // 8. 分配帧内存
-
-    // 9. 创建像素格式转换上下文
-
-    // 10. 分配RGB帧内存
-
-    // 11. 解码视频帧
-
-    // 12. 像素格式转换
-
-    // 13. 渲染视频帧
-
-    // 14. 清理资源
-
 }

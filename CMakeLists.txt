@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(D:/Environment/FFmpeg/include)
 link_directories(D:/Environment/FFmpeg/lib)
 
+include_directories("D:/Environment/SDL/SDL2-2.30.1/include")
+link_directories("D:/Environment/SDL/SDL2-2.30.1/lib/x64")
+
+
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
@@ -28,6 +32,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         ${PROJECT_SOURCES}
         PlayerContext.h PlayerContext.cpp
         Player.h Player.cpp
+        AudioPlayer.h AudioPlayer.cpp
+        DemuxThread.h DemuxThread.cpp
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET VideoPlayer APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -47,7 +53,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(VideoPlayer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets avcodec avdevice avfilter avformat avutil swresample swscale)
+target_link_libraries(VideoPlayer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets avcodec avdevice avfilter avformat avutil swresample swscale SDL2)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

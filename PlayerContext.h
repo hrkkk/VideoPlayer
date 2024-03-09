@@ -9,23 +9,29 @@ extern "C" {
 }
 #include <string>
 #include <queue>
+#include <memory>
+
+using AVPacketPtr = std::shared_ptr<AVPacket>;
 
 class PacketQueue {
 public:
-    void pushPacket(AVPacket* packet) {
+    void pushPacket(AVPacketPtr packet) {
         m_packetQueue.push(packet);
     }
-    AVPacket* popPacket() {
-        AVPacket* packet = m_packetQueue.front();
+    AVPacketPtr popPacket() {
+        AVPacketPtr packet = m_packetQueue.front();
         m_packetQueue.pop();
         return packet;
     }
     bool isEmpty() {
         return m_packetQueue.empty();
     }
+    int size() {
+        return m_packetQueue.size();
+    }
 
 private:
-    std::queue<AVPacket*> m_packetQueue;
+    std::queue<AVPacketPtr> m_packetQueue;
 };
 
 class PlayerContext
