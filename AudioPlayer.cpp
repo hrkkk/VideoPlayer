@@ -1,6 +1,32 @@
 #include "AudioPlayer.h"
 #include <iostream>
 
+
+void audioCallback(void* userdata, Uint8* stream, int len) {
+    int frame_size = 0;
+    AVFramePtr frame;
+
+    // Lock the queue and get a frame
+    {
+        std::unique_lock<std::mutex> lock(mtx);
+        if (!playQueue.empty()) {
+            frame = playQueue.front();
+            playQueue.pop();
+            playCount.fetch_add(1);
+            frame_size = av_samples_get_buffer_size(nullptr, 2, frame->nb_samples, AV_SAMPLE_FMT_S16, 0);
+        }
+    }
+
+    if (frame_size > 0 && frame) {
+        memcpy(stream, frame->data[0], frame_size);
+        // av_frame_free(&frame); // Remember to free the frame
+    } else {
+        // Fill the buffer with silence if no frame available
+        memset(stream, 0, len);
+    }
+}
+
+
 AudioPlayer::AudioPlayer()
 {
     // 初始化SDL
@@ -11,44 +37,51 @@ AudioPlayer::AudioPlayer()
 
     // 设置音频参数
     SDL_AudioSpec desiredSpec;
-    desiredSpec.freq = 48000;
+    desiredSpec.freq = 44100;
     desiredSpec.format = AUDIO_S16SYS;
     desiredSpec.channels = 2;
-    desiredSpec.samples = 1024;
-    desiredSpec.callback = nullptr;
+    desiredSpec.silence = 0;
+    desiredSpec.samples = 2048;
+    desiredSpec.callback = audioCallback;
 
     // 打开音频设备
-    audioDevice = SDL_OpenAudioDevice(nullptr, 0, &desiredSpec, nullptr, 0);
-    if (audioDevice == 0) {
+    m_audioDevice = SDL_OpenAudioDevice(nullptr, 0, &desiredSpec, nullptr, 0);
+    if (m_audioDevice == 0) {
         std::cout << "Faile to open audio: " << SDL_GetError() << std::endl;
     }
 
-    // 准备音频数据并播放
-    // SDL_QueueAudio(audioDevice, pcmData.data(), pcmData.size());
-    SDL_PauseAudioDevice(audioDevice, 0);
+    // 播放
+    SDL_PauseAudioDevice(m_audioDevice, 0);
+    m_isPlaying = true;
 }
 
-void AudioPlayer::appendPCMData(AVFrame* audioFrame)
+AudioPlayer::~AudioPlayer()
 {
-    uint8_t* audioData = audioFrame->data[0];
-    int dataSize = av_get_bytes_per_sample((AVSampleFormat)audioFrame->format) * audioFrame->nb_samples * audioFrame->channels;
-
-    AudioBuffer buffer;
-    buffer.data = audioData;
-    buffer.length = dataSize;
-    SDL_QueueAudio(audioDevice, buffer.data, buffer.length);
-
-    std::cout << "SDL queue length: " << SDL_GetQueuedAudioSize(audioDevice) << std::endl;
+    // 释放SDL资源
+    SDL_PauseAudioDevice(m_audioDevice, 1);
+    // SDL_CloseAudioDevice(m_audioDevice);
+    // SDL_Quit();
 }
 
 void AudioPlayer::play()
 {
-    SDL_PauseAudioDevice(audioDevice, 0);
+    SDL_PauseAudioDevice(m_audioDevice, 0);
+    m_isPlaying = true;
 }
 
 void AudioPlayer::pause()
 {
-    SDL_PauseAudioDevice(audioDevice, 1);
+    SDL_PauseAudioDevice(m_audioDevice, 1);
+    m_isPlaying = false;
+}
+
+void AudioPlayer::switchState()
+{
+    if (m_isPlaying) {
+        pause();
+    } else {
+        play();
+    }
 }
 
 void AudioPlayer::stop()

@@ -6,7 +6,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(D:/Environment/FFmpeg/include)
@@ -18,6 +18,10 @@ link_directories("D:/Environment/SDL/SDL2-2.30.1/lib/x64")
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+
+# 添加OpenGL库链接
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS OpenGLWidgets REQUIRED)
+
 
 set(PROJECT_SOURCES
         main.cpp
@@ -34,6 +38,13 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         Player.h Player.cpp
         AudioPlayer.h AudioPlayer.cpp
         DemuxThread.h DemuxThread.cpp
+        VideoDecodeThread.h VideoDecodeThread.cpp
+        AudioDecodeThread.h AudioDecodeThread.cpp
+        BaseThread.h BaseThread.cpp
+        CustomProgressBar.h CustomProgressBar.cpp
+        res.qrc
+        Utils.h Utils.cpp
+        CustomOpenGLWidget.h CustomOpenGLWidget.cpp
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET VideoPlayer APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -54,6 +65,7 @@ else()
 endif()
 
 target_link_libraries(VideoPlayer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets avcodec avdevice avfilter avformat avutil swresample swscale SDL2)
+target_link_libraries(VideoPlayer PRIVATE Qt6::OpenGLWidgets)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

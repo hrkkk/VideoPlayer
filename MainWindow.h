@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QMenu>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -16,9 +17,16 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();   
+    ~MainWindow();
+
+signals:
+    void sig_showImage(uchar* ptr, uint width, uint height);
+
+private:
+    void initMenu();
 
 private:
     Ui::MainWindow *ui;
+    QMenu* m_menu;
 };
 #endif // MAINWINDOW_H

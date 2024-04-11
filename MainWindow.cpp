@@ -1,27 +1,38 @@
 #include "MainWindow.h"
 #include "./ui_MainWindow.h"
 
+
 extern "C" {
+#include <SDL.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 }
 #include <sstream>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
+#include <format>
 
 #include "PlayerContext.h"
+#include "DemuxThread.h"
+#include "VideoDecodeThread.h"
+#include "AudioDecodeThread.h"
 #include "AudioPlayer.h"
+#include "Utils.h"
 
 #include <QImage>
 #include <QPicture>
 #include <QPainter>
 #include <QTimer>
+
+AVHWDeviceType type;
+AVPixelFormat hwPixelFmt;
+AVBufferRef* hwDeviceCtx = nullptr;
 
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 using AVFramePtr = std::shared_ptr<AVFrame>;
@@ -30,14 +41,28 @@ using PlayerContextPtr = std::shared_ptr<PlayerContext>;
 std::queue<AVFramePtr> displayQueue;
 std::queue<AVFramePtr> playQueue;
 std::mutex mtx;
-std::atomic<int> decodeCount(0);
-std::atomic<int> displayCount(0);
 std::condition_variable cond;
 
+int totalFrames = 0;
+std::atomic<int> displayCount(0);
+std::atomic<int> playCount(0);
+
+std::atomic<int> totalPackets(0);
+std::atomic<int> videoPackets(0);
+std::atomic<int> audioPackets(0);
+std::atomic<int> videoFrames(0);
+std::atomic<int> audioFrames(0);
+std::atomic<bool> stopFlag(false);
+std::string mediaDuration;
+
+
 void start(PlayerContext* playerCtx);
-int decodeVideoPacket(PlayerContext* playerCtx);
-int decodeAudioPacket(PlayerContext* playerCtx);
-int getPacket(PlayerContext* playerCtx);
+
+PlayerContext* playerCtx = nullptr;
+DemuxThread* demuxThread = nullptr;
+VideoDecodeThread* videoDecodeThread = nullptr;
+AudioDecodeThread* audioDecodeThread = nullptr;
+AudioPlayer* audioPlayer = nullptr;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -45,36 +70,99 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    this->setWindowFlag(Qt::FramelessWindowHint);
 
-    PlayerContext* playerCtx = new PlayerContext();
+    connect(ui->btn_min, &QPushButton::clicked, this, [this]() {
+        this->showMinimized();
+    });
+    connect(ui->btn_max, &QPushButton::clicked, this, [this]() {
+        if (this->isMaximized()) {
+            this->showNormal();
+        } else {
+            this->showMaximized();
+        }
+    });
+    connect(ui->btn_exit, &QPushButton::clicked, this, [this]() {
+        this->close();
+    });
 
-    std::string filePath = "H:/DataCenter/Photo/#2 Photo/other/01e5abbe8cd9b177010370038d26e57967_258.mp4";
-    playerCtx->m_filename = filePath;
+    ui->infoArea->hide();
+    connect(ui->btn_more, &QPushButton::clicked, this, [this]() {
+        if (ui->infoArea->isHidden()) {
+            ui->infoArea->show();
+        } else {
+            ui->infoArea->hide();
+        }
+    });
+
+    ui->volume->slotSetValue(0.5);
+
+    playerCtx = new PlayerContext();
+
+    std::string filePath = "C:/Users/hrkkk/Desktop/20240401_171348.mp4";
+    playerCtx->setFilename(filePath);
     start(playerCtx);
 
+    ui->duration->setText(QString::fromStdString(mediaDuration));
 
-    // 解封装线程
-    std::thread demuxThread([](PlayerContext* playerCtx) {
-        getPacket(playerCtx);
-    }, playerCtx);
-    demuxThread.detach();
+    demuxThread = new DemuxThread(playerCtx);
+    demuxThread->start();
 
-    // 视频帧解码线程
-    std::thread videoDecodeThread([](PlayerContext* playerCtx) {
-        decodeVideoPacket(playerCtx);
-    }, playerCtx);
-    videoDecodeThread.detach();
+    videoDecodeThread = new VideoDecodeThread(playerCtx);
+    videoDecodeThread->start();
 
-    // 音频帧解码线程
-    std::thread audioDecodeThread([](PlayerContext* playerCtx) {
-        decodeAudioPacket(playerCtx);
-    }, playerCtx);
-    audioDecodeThread.detach();
+    audioDecodeThread = new AudioDecodeThread(playerCtx);
+    audioDecodeThread->start();
+
+    audioPlayer = new AudioPlayer();
+
+    connect(this, &MainWindow::sig_showImage, ui->openGLWidget, &CustomOpenGLWidget::slot_showYUV);
+
+
+    connect(ui->btn_pause, &QPushButton::clicked, this, [this]() {
+        playerCtx->m_isPaused = !playerCtx->m_isPaused;
+        audioPlayer->switchState();
+        if (playerCtx->m_isPaused) {
+            ui->btn_pause->setIcon(QIcon(":/resource/play.png"));
+        } else {
+            ui->btn_pause->setIcon(QIcon(":/resource/pause.png"));
+        }
+    });
+
+    connect(ui->btn_next, &QPushButton::clicked, this, [=]() {
+        std::lock_guard<std::mutex> lock(mtx);
+        while (displayQueue.size()) {
+            displayQueue.pop();
+        }
+        playerCtx->seekToPos(3 * AV_TIME_BASE);
+    });
+
+    initMenu();
+    connect(ui->btn_setting, &QPushButton::clicked, this, [this]() {
+        m_menu->show();
+    });
+
+    connect(ui->btn_fullScreen, &QPushButton::clicked, this, [this]() {
+        emit ui->btn_max->clicked();
+    });
 
 
     QTimer* timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [&]() {
         std::lock_guard<std::mutex> lock(mtx);
+
+        ui->totalPackets->setText(QString::number(totalPackets));
+        ui->videoPackets->setText(QString::number(videoPackets));
+
+        ui->audioPackets->setText(QString::number(audioPackets));
+        ui->videoFrames->setText(QString::number(videoFrames));
+        ui->audioFrames->setText(QString::number(audioFrames));
+        ui->displayFrames->setText(QString::number(displayCount));
+        ui->playFrames->setText(QString::number(playCount));
+
+        if (playerCtx->m_isPaused) {
+            return;
+        }
 
         // 如果有待播放的视频帧
         if (!displayQueue.empty()) {
@@ -82,20 +170,72 @@ MainWindow::MainWindow(QWidget *parent)
             AVFramePtr frame = displayQueue.front();
             displayQueue.pop();
 
-            // 将 AVFrame 转换为 QImage
-            QImage image(frame->data[0], frame->width, frame->height, frame->linesize[0], QImage::Format_RGB888);
+            // // 音视频同步
+            // double currentPts = frame->pts;
+            // double sec = currentPts * av_q2d(playerCtx->m_formatCtx->streams[playerCtx->m_videoStreamIndex]->time_base);
+            // Log(std::to_string(currentPts));
+            // double delay = currentPts - playerCtx->m_frameLastPts;
+            // if (delay <= 0 || delay >= 10.0) {
+            //     delay = playerCtx->m_frameLastDelay;
+            // }
+            // playerCtx->m_frameLastDelay = delay;
+            // playerCtx->m_frameLastPts = currentPts;
 
-            // 将 QImage 设置为 QLabel 的图像
-            QPixmap pixmap = QPixmap::fromImage(image);
-            ui->screen->setPixmap(pixmap.scaled(ui->screen->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            // double refClock = getAudioClock(playerCtx);
+            // double diff = currentPts - refClock;
 
-            // 刷新 QLabel
-            ui->screen->update();
+            // const double AV_SYNC_THRESHOLD = 0.01;
+            // const double AV_NOSYNC_THRESHOLD = 10.0;
+            // double syncThreshold = (delay > AV_SYNC_THRESHOLD) ? delay : AV_SYNC_THRESHOLD;
+
+            // if (fabs(diff) < AV_NOSYNC_THRESHOLD) {
+            //     if (diff < -syncThreshold) {
+            //         delay = 0;
+            //     } else if (diff >= syncThreshold) {
+            //         delay = 2 * delay;
+            //     }
+            // }
+
+            // playerCtx->m_frameTimer += delay;
+            // double actualDelay = playerCtx->m_frameTimer - (av_gettime() / AV_TIME_BASE);
+            // if (actualDelay < 0.010) {
+            //     actualDelay = 0.010;
+            // }
+
+            // 使用滤镜处理Frame
+            int ret = av_buffersrc_add_frame(playerCtx->m_bufferSrcCtx, frame.get());
+            if (ret < 0) {
+                std::cout << "add frame error.\n";
+            }
+            AVFrame* filtFrame = av_frame_alloc();
+            ret = av_buffersink_get_frame(playerCtx->m_bufferSinkCtx, filtFrame);
+            if (ret < 0) {
+                std::cout << "get frame error.\n";
+            }
+
+            uint8_t* buffer = nullptr;
+            int numBytes = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height, 1);
+            buffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
+
+            av_image_fill_arrays(filtFrame->data, filtFrame->linesize, buffer, playerCtx->m_videoCodecCtx->pix_fmt, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height, 1);
+
+            // emit sig_showImage(buffer, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height);
+
+            av_free(&buffer);
+
+            // // 将 AVFrame 转换为 QImage
+            // QImage image(filtFrame->data[0], filtFrame->width, filtFrame->height, filtFrame->linesize[0], QImage::Format_RGB888);
+            av_frame_free(&filtFrame);
+
+            // // 将 QImage 设置为QLabel的图像
+            // QPixmap pixmap = QPixmap::fromImage(image);
+            // ui->screen->setPixmap(pixmap.scaled(ui->screen->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
             displayCount.fetch_add(1);
-            ui->decodeNum->setText(QString::number(decodeCount.load()));
-            ui->displayNum->setText(QString::number(displayCount.load()));
-            ui->progressBar->setValue(displayCount.load());
+
+            double playProgress = static_cast<double>(displayCount * 1.0 / totalFrames);
+            double cacheProgress = static_cast<double>((displayCount + displayQueue.size()) * 1.0 / totalFrames);
+            ui->progressBar->slotSetValue(playProgress, cacheProgress);
 
             // std::cout << "DisplayCount: " << displayCount << std::endl;
             // std::cout << "Display one frame" << std::endl;
@@ -103,30 +243,62 @@ MainWindow::MainWindow(QWidget *parent)
     });
     timer->setInterval(40);
     timer->start();
-
-
-    AudioPlayer* audioPlayer = new AudioPlayer();
-    QTimer* audioTimer = new QTimer(this);
-    connect(audioTimer, &QTimer::timeout, this, [=]() {
-        std::unique_lock<std::mutex> lock(mtx);
-
-        // 如果有待播放的音频帧
-        if (!playQueue.empty()) {
-            // 取出音频
-            AVFramePtr frame = playQueue.front();
-            playQueue.pop();
-
-            // 播放
-            audioPlayer->appendPCMData(frame.get());
-        }
-    });
-    audioTimer->setInterval(100);
-    audioTimer->start();
 }
 
+std::atomic_flag flag = ATOMIC_FLAG_INIT;
+volatile bool stopp = false;
 MainWindow::~MainWindow()
 {
+    // 停止所有子线程
+    // playerCtx->m_isStopped = true;
+
+    if (audioDecodeThread != nullptr) {
+        audioDecodeThread->stop();
+        delete audioDecodeThread;
+        audioDecodeThread = nullptr;
+    }
+
+    if (videoDecodeThread != nullptr) {
+        videoDecodeThread->stop();
+        delete videoDecodeThread;
+        videoDecodeThread = nullptr;
+    }
+
+    if (demuxThread != nullptr) {
+        demuxThread->stop();
+        delete demuxThread;
+        demuxThread = nullptr;
+    }
+
+    if (playerCtx != nullptr) {
+        delete playerCtx;
+        playerCtx = nullptr;
+    }
+
+    if (audioPlayer != nullptr) {
+        delete audioPlayer;
+        audioPlayer = nullptr;
+    }
+
     delete ui;
+}
+
+void MainWindow::initMenu()
+{
+    m_menu = new QMenu(this);
+
+    QMenu* imgRotateMenu = new QMenu("图像旋转", this);
+    QAction* rotate90 = new QAction("顺时针旋转90°", this);
+    imgRotateMenu->addAction(rotate90);
+
+    QMenu* imgFlipMenu = new QMenu("图像翻转", this);
+    QAction* horFlip = new QAction("左右翻转", this);
+    QAction* verFlip = new QAction("上下翻转", this);
+    imgFlipMenu->addAction(horFlip);
+    imgFlipMenu->addAction(verFlip);
+
+    m_menu->addMenu(imgRotateMenu);
+    m_menu->addMenu(imgFlipMenu);
 }
 
 void customLogCallback(void* ptr, int level, const char* fmt, va_list vl)
@@ -135,6 +307,80 @@ void customLogCallback(void* ptr, int level, const char* fmt, va_list vl)
     vsnprintf(buf, sizeof(buf), fmt, vl);
     std::stringstream* ss = static_cast<std::stringstream*>(ptr);
     *ss << buf;
+}
+
+AVPixelFormat getHwFmtCallback(AVCodecContext* ctx, const AVPixelFormat* pixFmt)
+{
+    const AVPixelFormat* p;
+
+    for (p = pixFmt; *p != -1; ++p) {
+        if (*p == hwPixelFmt) {
+            return *p;
+        }
+    }
+
+    std::cout << "Failed to get HW surface format.\n";
+    return AV_PIX_FMT_NONE;
+}
+
+void initFilter(PlayerContext* playerCtx)
+{
+    int ret = 0;
+    // 创建滤镜图实例
+    playerCtx->m_filterGraph = avfilter_graph_alloc();
+    // 获取滤镜处理源和输出
+    const AVFilter* bufferSrc = avfilter_get_by_name("buffer");
+    const AVFilter* bufferSink = avfilter_get_by_name("buffersink");
+    // 初始化滤镜输入和输出
+    playerCtx->m_filterOutputs = avfilter_inout_alloc();
+    playerCtx->m_filterInputs = avfilter_inout_alloc();
+
+    if (!playerCtx->m_filterGraph || !playerCtx->m_filterInputs || !playerCtx->m_filterOutputs) {
+        ret = AVERROR(ENOMEM);
+        std::cout << ret << std::endl;
+    }
+    // 准备filter参数
+    char args[512] = {};
+    AVRational timeBase = playerCtx->m_formatCtx->streams[playerCtx->m_videoStreamIndex]->time_base;
+    snprintf(args, sizeof(args),
+             "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+             playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height,
+             AV_PIX_FMT_YUV420P,
+             timeBase.num, timeBase.den,
+             playerCtx->m_videoCodecCtx->sample_aspect_ratio.num, playerCtx->m_videoCodecCtx->sample_aspect_ratio.den);
+    std::cout << args << std::endl;
+    // 根据参数创建输入滤镜的上下文，并添加到滤镜图
+    ret = avfilter_graph_create_filter(&playerCtx->m_bufferSrcCtx, bufferSrc, "in", args, nullptr, playerCtx->m_filterGraph);
+    if (ret < 0) {
+        std::cout << "Cannot create buffer src. " << ret << "\n";
+    }
+    // 根据参数创建输入滤镜的上下文，并添加到滤镜图
+    ret = avfilter_graph_create_filter(&playerCtx->m_bufferSinkCtx, bufferSink, "out", nullptr, nullptr, playerCtx->m_filterGraph);
+    if (ret < 0) {
+        std::cout << "Cannot create buffer sink.\n";
+    }
+    // 设置其他参数
+    AVPixelFormat pix_fmts[] = {AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE};
+    ret = av_opt_set_int_list(playerCtx->m_bufferSinkCtx, "pix_fmts", pix_fmts, AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        std::cout << "Cannot set output pixel format.\n";
+    }
+    // 建立滤镜解析器
+    const char* filter_desc = "hflip";
+    // 为输入滤镜关联滤镜名
+    playerCtx->m_filterOutputs->name = av_strdup("in");
+    playerCtx->m_filterOutputs->filter_ctx = playerCtx->m_bufferSrcCtx;
+    playerCtx->m_filterOutputs->pad_idx = 0;
+    playerCtx->m_filterOutputs->next = nullptr;
+    // 为输出滤镜关联滤镜名
+    playerCtx->m_filterInputs->name = av_strdup("out");
+    playerCtx->m_filterInputs->filter_ctx = playerCtx->m_bufferSinkCtx;
+    playerCtx->m_filterInputs->pad_idx = 0;
+    playerCtx->m_filterInputs->next = nullptr;
+    // 解析Filter字符串，建立Filter间的连接
+    avfilter_graph_parse_ptr(playerCtx->m_filterGraph, filter_desc, &playerCtx->m_filterInputs, &playerCtx->m_filterOutputs, nullptr);
+    // 配置滤镜图
+    avfilter_graph_config(playerCtx->m_filterGraph, nullptr);
 }
 
 int openStream(PlayerContext* playerCtx, int mediaType)
@@ -149,10 +395,49 @@ int openStream(PlayerContext* playerCtx, int mediaType)
         std::cout << "Can not find a audio stream in the input file\n";
         return -1;
     }
+
+#ifdef USE_HARDWARE_DECODE
+    if (mediaType == AVMEDIA_TYPE_VIDEO) {
+        type = av_hwdevice_find_type_by_name("dxva2");
+        if (type == AV_HWDEVICE_TYPE_NONE) {
+            std::cout << "Device type dxva2 is not supported.\n";
+            std::cout << "Available device types:";
+            while ((type = av_hwdevice_iterate_types(type)) != AV_HWDEVICE_TYPE_NONE) {
+                std::cout << " " << av_hwdevice_get_type_name(type);
+            }
+            std::cout << std::endl;
+        }
+
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
+            if (!config) {
+                std::cout << "Decoder " << codec->name << " does not support device type " << av_hwdevice_get_type_name(type) << ".\n";
+            }
+            if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == type) {
+                hwPixelFmt = config->pix_fmt;
+                break;
+            }
+        }
+    }
+#endif
+
     // 根据得到的解码器创建解码器上下文
     codecCtx = avcodec_alloc_context3(codec);
     // 将format上的关键信息赋值给解码器上下文
     avcodec_parameters_to_context(codecCtx, formatCtx->streams[streamIndex]->codecpar);
+
+#ifdef USE_HARDWARE_DECODE
+    if (mediaType == AVMEDIA_TYPE_VIDEO) {
+        codecCtx->get_format = getHwFmtCallback;
+
+        if (av_hwdevice_ctx_create(&hwDeviceCtx, type, NULL, NULL, 0) < 0) {
+            std::cout << "Failed to create specified HW device.\n";
+            return -1;
+        }
+
+        codecCtx->hw_device_ctx = av_buffer_ref(hwDeviceCtx);
+    }
+#endif
 
     // 打开解码器
     if (avcodec_open2(codecCtx, codec, NULL) < 0) {
@@ -165,19 +450,29 @@ int openStream(PlayerContext* playerCtx, int mediaType)
         playerCtx->m_audioStreamIndex = streamIndex;
         playerCtx->m_audioCodecCtx = codecCtx;
         playerCtx->m_audioStream = formatCtx->streams[streamIndex];
-        playerCtx->m_audioSwrCtx = NULL;
-        AVChannelLayout outChannel;
-        av_channel_layout_default(&outChannel, 2);
-        swr_alloc_set_opts2(&playerCtx->m_audioSwrCtx, &outChannel, AV_SAMPLE_FMT_S16, 48000,
-                            &codecCtx->ch_layout, codecCtx->sample_fmt, codecCtx->sample_rate, 0, NULL);
+        playerCtx->m_audioSwrCtx = swr_alloc();
+        av_opt_set_chlayout(playerCtx->m_audioSwrCtx, "in_chlayout", &codecCtx->ch_layout, 0);
+        av_opt_set_int(playerCtx->m_audioSwrCtx, "in_sample_rate", codecCtx->sample_rate, 0);
+        av_opt_set_sample_fmt(playerCtx->m_audioSwrCtx, "in_sample_fmt", codecCtx->sample_fmt, 0);
+        AVChannelLayout outLayout;
+        av_channel_layout_default(&outLayout, 2);
+        av_opt_set_chlayout(playerCtx->m_audioSwrCtx, "out_chlayout", &outLayout, 0);
+        av_opt_set_int(playerCtx->m_audioSwrCtx, "out_sample_rate", 48000, 0);
+        av_opt_set_sample_fmt(playerCtx->m_audioSwrCtx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
         swr_init(playerCtx->m_audioSwrCtx);
         break;
     case AVMEDIA_TYPE_VIDEO:
         playerCtx->m_videoStreamIndex = streamIndex;
         playerCtx->m_videoCodecCtx = codecCtx;
         playerCtx->m_videoStream = formatCtx->streams[streamIndex];
+#ifdef USE_HARDWARE_DECODE
+        playerCtx->m_videoSwsCtx = sws_getContext(codecCtx->width, codecCtx->height, AV_PIX_FMT_NV12, codecCtx->width, codecCtx->height,
+                         AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+#else
         playerCtx->m_videoSwsCtx = sws_getContext(codecCtx->width, codecCtx->height, codecCtx->pix_fmt, codecCtx->width, codecCtx->height,
                                                   AV_PIX_FMT_RGB24, SWS_BICUBIC, NULL, NULL, NULL);
+#endif
+
         break;
     default:
         break;
@@ -186,176 +481,6 @@ int openStream(PlayerContext* playerCtx, int mediaType)
     return 0;
 }
 
-int getPacket(PlayerContext* playerCtx)
-{
-    while (true) {
-        std::lock_guard<std::mutex> lock(mtx);
-
-        if (playerCtx->m_audioQueue.size() > 50 || playerCtx->m_videoQueue.size() > 50) {
-            continue;
-        }
-
-        AVPacketPtr packet(av_packet_alloc(), [](AVPacket* ptr) {
-            // std::cout << "Packet free" << std::endl;
-            av_packet_free(&ptr);
-        });
-
-        if (av_read_frame(playerCtx->m_formatCtx, packet.get()) < 0) {
-            std::cout << "Read frame error." << std::endl;
-            break;
-        }
-
-        if (packet->stream_index == playerCtx->m_videoStreamIndex) {
-            {
-                // 添加到视频包队列
-                playerCtx->m_videoQueue.pushPacket(packet);
-
-                cond.notify_one();
-
-                // std::cout << "Send one packet" << packet << std::endl;
-            }
-        } else if (packet->stream_index == playerCtx->m_audioStreamIndex) {
-            {
-                // 添加到音频包队列
-                playerCtx->m_audioQueue.pushPacket(packet);
-
-                cond.notify_one();
-
-                // std::cout << "Get one packet" << std::endl;
-            }
-        } else {
-            av_packet_unref(packet.get());
-        }
-    }
-
-    return 0;
-}
-
-int decodeVideoPacket(PlayerContext* playerCtx)
-{
-    AVCodecContext* codecCtx = playerCtx->m_videoCodecCtx;
-    AVFrame* frame = av_frame_alloc();
-
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx);
-        cond.wait(lock, [=]{
-            return !playerCtx->m_videoQueue.isEmpty();
-        });
-
-        // 从视频队列中获取一包数据
-        AVPacketPtr packet = playerCtx->m_videoQueue.popPacket();
-
-        // 解码该数据包
-        int ret = avcodec_send_packet(codecCtx, packet.get());
-        if (ret == 0) {
-            ret = avcodec_receive_frame(codecCtx, frame);
-        }
-
-        // 处理该帧图像
-        if (ret == 0) {
-            decodeCount.fetch_add(1);
-            // std::cout << "Frame Num: " << decodeCount.load() << std::endl;
-
-            // 创建一个用于存储转换后的 RGB 帧的 AVFrame 对象
-            AVFramePtr frameRGB(av_frame_alloc(), [](AVFrame* ptr) {
-                // std::cout << "FrameRGB free" << std::endl;
-                av_frame_free(&ptr);
-            });
-
-            // 设置 RGB 帧的参数
-            frameRGB->format = AV_PIX_FMT_RGB24; // 设置为 RGB 格式
-            frameRGB->width = frame->width;
-            frameRGB->height = frame->height;
-
-            // 分配 RGB 帧的数据空间
-            av_frame_get_buffer(frameRGB.get(), 0);
-
-            // 执行图像转换
-            sws_scale(playerCtx->m_videoSwsCtx, frame->data, frame->linesize, 0, frameRGB->height,
-                      frameRGB->data, frameRGB->linesize);
-
-            // 使用转换后的 RGB 帧进行后续处理
-            // std::cout << "Decode one video frame" << std::endl;
-
-            {
-                // 将处理后的图像放入显示队列
-                displayQueue.push(frameRGB);
-
-                // std::cout << "Decode one frame" << std::endl;
-            }
-        }
-
-        av_frame_unref(frame);
-    }
-
-    av_frame_free(&frame);
-
-    return 0;
-}
-
-int decodeAudioPacket(PlayerContext* playerCtx)
-{
-    AVCodecContext* codecCtx = playerCtx->m_audioCodecCtx;
-    AVFrame* frame = av_frame_alloc();
-
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx);
-        cond.wait(lock, [=]{
-            return !playerCtx->m_audioQueue.isEmpty();
-        });
-
-        // 从音频队列中取出一包数据
-        AVPacketPtr packet = playerCtx->m_audioQueue.popPacket();
-
-        // 解码
-        int ret = avcodec_send_packet(codecCtx, packet.get());
-        if (ret == 0) {
-            ret = avcodec_receive_frame(codecCtx, frame);
-        }
-
-        // 处理该帧音频
-        if (ret == 0) {
-            // 设置输入和输出参数
-            int srcRate = frame->sample_rate;
-            int dstRate = 48000;
-            int srcChannels = av_get_channel_layout_nb_channels(frame->channel_layout);
-            int dstChannels = 2;
-            enum AVSampleFormat srcSampleFmt = (AVSampleFormat)frame->format;
-            enum AVSampleFormat dstSampleFmt = AV_SAMPLE_FMT_S16;
-
-            // 计算输出的样本数量
-            int dstSamplesNum = av_rescale_rnd(swr_get_delay(playerCtx->m_audioSwrCtx, srcRate) + frame->nb_samples,
-                                               dstRate,
-                                               srcRate,
-                                               AV_ROUND_UP);
-
-            // 创建FramePCM
-            AVFramePtr framePCM(av_frame_alloc(), [](AVFrame* ptr) {
-                std::cout << "FramePCM free" << std::endl;
-                av_frame_free(&ptr);
-            });
-
-            // 填充输出的Frame
-            framePCM->sample_rate = dstRate;
-            framePCM->format = dstSampleFmt;
-            framePCM->channels = dstChannels;
-            framePCM->nb_samples = dstSamplesNum;
-
-            // 分配输出的样本缓冲区
-            av_frame_get_buffer(framePCM.get(), 0);
-
-            // 重采样
-            swr_convert_frame(playerCtx->m_audioSwrCtx, framePCM.get(), frame);
-
-            // 将处理后的音频放入播放队列
-            playQueue.push(framePCM);
-        }
-        av_frame_unref(frame);
-    }
-    av_frame_free(&frame);
-
-    return 0;
-}
 
 void start(PlayerContext* playerCtx)
 {
@@ -371,6 +496,13 @@ void start(PlayerContext* playerCtx)
         qDebug() << "Can not find stream information";
         return;
     }
+
+    int64_t duration = playerCtx->m_formatCtx->duration;
+    int hours = (duration / (AV_TIME_BASE * (long long)3600));
+    int minutes = (duration % (AV_TIME_BASE * (long long)3600)) / (AV_TIME_BASE * 60);
+    int seconds = (duration % (AV_TIME_BASE * (long long)60)) / AV_TIME_BASE;
+
+    mediaDuration = std::to_string(hours) + ":" + std::to_string(minutes) + ":" + std::to_string(seconds);
 
     // 自定义输出流
     // std::stringstream ss;
@@ -390,4 +522,9 @@ void start(PlayerContext* playerCtx)
         std::cout << "Open video stream failed.\r\n";
         return;
     }
+
+    initFilter(playerCtx);
+
+    totalFrames = playerCtx->m_formatCtx->streams[playerCtx->m_videoStreamIndex]->nb_frames;
+    std::cout << totalFrames << std::endl;
 }

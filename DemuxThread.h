@@ -1,15 +1,29 @@
 #ifndef DEMUXTHREAD_H
 #define DEMUXTHREAD_H
 
-class DemuxThread
+#include <mutex>
+#include <condition_variable>
+#include "PlayerContext.h"
+#include "BaseThread.h"
+
+extern std::mutex mtx;
+extern std::condition_variable cond;
+extern std::atomic<int> totalPackets;
+extern std::atomic<int> videoPackets;
+extern std::atomic<int> audioPackets;
+
+class DemuxThread : public BaseThread
 {
 public:
-    DemuxThread();
+    DemuxThread(PlayerContext* playerCtx);
+    ~DemuxThread();
 
-public:
-    int loadFile();
+    void task() override;
 
-    int loop();
+    void demux();
+
+private:
+    PlayerContext* m_playerCtx;
 };
 
 #endif // DEMUXTHREAD_H
