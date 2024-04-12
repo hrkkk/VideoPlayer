@@ -3,6 +3,9 @@
 
 #include <QMainWindow>
 #include <QMenu>
+#include "PlayerContext.h"
+
+using AVFramePtr = std::shared_ptr<AVFrame>;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -20,7 +23,7 @@ public:
     ~MainWindow();
 
 signals:
-    void sig_showImage(uchar* ptr, uint width, uint height);
+    void sig_showImage(AVFramePtr ptr, uint width, uint height);
 
 private:
     void initMenu();

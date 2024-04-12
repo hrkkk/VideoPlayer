@@ -1,6 +1,7 @@
 #include "VideoDecodeThread.h"
 
 #include <iostream>
+#include <QDebug>
 
 VideoDecodeThread::VideoDecodeThread(PlayerContext* playerCtx) : m_playerCtx(playerCtx)
 {}

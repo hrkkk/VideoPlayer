@@ -8,7 +8,9 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
 #include <QWidget>
+#include "PlayerContext.h"
 
+using AVFramePtr = std::shared_ptr<AVFrame>;
 
 class CustomOpenGLWidget : public QOpenGLWidget, QOpenGLFunctions
 {
@@ -17,7 +19,7 @@ public:
     explicit CustomOpenGLWidget(QWidget* parent = nullptr);
 
 public slots:
-    void slot_showYUV(uchar* ptr, uint width, uint height);
+    void slot_showYUV(AVFramePtr data, uint width, uint height);
 
 protected:
     void initializeGL() override;
@@ -32,8 +34,8 @@ private:
     GLuint textureUniformY, textureUniformU, textureUniformV;
     QOpenGLTexture* textureY = nullptr, * textureU = nullptr, * textureV = nullptr;
     GLuint idY, idU, idV;
-    uint videoW, videoH;
-    uchar* yuvPtr = nullptr;
+    uint videoWidth, videoHeight;
+    AVFramePtr yuvData;
 };
 
 #endif // CUSTOMOPENGLWIDGET_H

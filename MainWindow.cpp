@@ -166,6 +166,7 @@ MainWindow::MainWindow(QWidget *parent)
 
         // 如果有待播放的视频帧
         if (!displayQueue.empty()) {
+
             // 取出图像
             AVFramePtr frame = displayQueue.front();
             displayQueue.pop();
@@ -203,29 +204,24 @@ MainWindow::MainWindow(QWidget *parent)
             // }
 
             // 使用滤镜处理Frame
-            int ret = av_buffersrc_add_frame(playerCtx->m_bufferSrcCtx, frame.get());
-            if (ret < 0) {
-                std::cout << "add frame error.\n";
-            }
-            AVFrame* filtFrame = av_frame_alloc();
-            ret = av_buffersink_get_frame(playerCtx->m_bufferSinkCtx, filtFrame);
-            if (ret < 0) {
-                std::cout << "get frame error.\n";
-            }
+            // int ret = av_buffersrc_add_frame(playerCtx->m_bufferSrcCtx, frame.get());
+            // if (ret < 0) {
+            //     std::cout << "add frame error.\n";
+            // }
+            // AVFrame* filtFrame = av_frame_alloc();
+            // ret = av_buffersink_get_frame(playerCtx->m_bufferSinkCtx, filtFrame);
+            // if (ret < 0) {
+            //     std::cout << "get frame error.\n";
+            // }
 
-            uint8_t* buffer = nullptr;
-            int numBytes = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height, 1);
-            buffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
+            // qDebug() << "Display frame " << displayCount;
+            // 将 Frame 发送到 GPU 进行渲染
+            emit sig_showImage(frame, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height);
 
-            av_image_fill_arrays(filtFrame->data, filtFrame->linesize, buffer, playerCtx->m_videoCodecCtx->pix_fmt, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height, 1);
-
-            // emit sig_showImage(buffer, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height);
-
-            av_free(&buffer);
 
             // // 将 AVFrame 转换为 QImage
-            // QImage image(filtFrame->data[0], filtFrame->width, filtFrame->height, filtFrame->linesize[0], QImage::Format_RGB888);
-            av_frame_free(&filtFrame);
+            // QImage image(frame->data[0], frame->width, frame->height, frame->linesize[0], QImage::Format_RGB888);
+            // // av_frame_free(&filtFrame);
 
             // // 将 QImage 设置为QLabel的图像
             // QPixmap pixmap = QPixmap::fromImage(image);
