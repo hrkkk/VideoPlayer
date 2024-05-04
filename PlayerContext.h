@@ -15,6 +15,7 @@ extern "C" {
 #include <queue>
 #include <memory>
 #include <atomic>
+#include "Utils.h"
 
 
 #define USE_HARDWARE_DECODE

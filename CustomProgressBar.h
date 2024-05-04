@@ -17,7 +17,7 @@ public:
     ~CustomProgressBar();
 
 signals:
-    void sigCustomSliderValueChanged(double pos);//自定义的鼠标单击信号，用于捕获并处理
+    void sign_sliderValueChanged(double pos);//自定义的鼠标单击信号，用于捕获并处理
 
 public:
     //获取pos
@@ -29,10 +29,10 @@ public slots:
     void slotSetValue(double pos);
 
 protected:
-    void mousePressEvent(QMouseEvent *ev);
-    void mouseMoveEvent(QMouseEvent *ev);
-    void mouseReleaseEvent(QMouseEvent *ev);
-    void paintEvent(QPaintEvent *);
+    void mousePressEvent(QMouseEvent *ev) override;
+    void mouseMoveEvent(QMouseEvent *ev) override;
+    void mouseReleaseEvent(QMouseEvent *ev) override;
+    void paintEvent(QPaintEvent *) override;
 
 private:
     double m_upperPos = 0;

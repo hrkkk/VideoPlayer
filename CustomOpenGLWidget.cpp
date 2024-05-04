@@ -1,7 +1,15 @@
 #include "CustomOpenGLWidget.h"
 #include <QDebug>
+#include <QMouseEvent>
 
 CustomOpenGLWidget::CustomOpenGLWidget(QWidget* parent) : QOpenGLWidget(parent) {}
+
+void CustomOpenGLWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::RightButton) {
+        emit sign_mouseClicked(event->globalPosition().x(), event->globalPosition().y());
+    }
+}
 
 #define GET_GLSTR(x) #x
 const char* vsrc = GET_GLSTR(
@@ -17,18 +25,17 @@ const char* vsrc = GET_GLSTR(
 );
 
 const char* fsrc = GET_GLSTR(
-    varying vec2 textureOut;
+    varying vec4 textureOut;
     uniform sampler2D tex_y;
-    uniform sampler2D tex_u;
-    uniform sampler2D tex_v;
+    uniform sampler2D tex_uv;
 
     void main(void)
     {
         vec3 yuv;
         vec3 rgb;
-        yuv.x = texture2D(tex_y, textureOut).r;
-        yuv.y = texture2D(tex_u, textureOut).r - 0.5;
-        yuv.z = texture2D(tex_v, textureOut).r - 0.5;
+        yuv.x = texture2D(tex_y, textureOut.st).r - 0.0625;
+        yuv.y = texture2D(tex_uv, textureOut.st).r - 0.5;
+        yuv.z = texture2D(tex_uv, textureOut.st).g - 0.5;
         rgb = mat3( 1,       1,         1,
                     0,       -0.39465,  2.03211,
                     1.13983, -0.58060,  0) * yuv;
@@ -49,10 +56,10 @@ void CustomOpenGLWidget::initializeGL()
         +1.0f, +1.0f,
         +1.0f, -1.0f,
         // 纹理坐标
-        0.0f, 1.0f,
-        0.0f, 0.0f,
-        1.0f, 0.0f,
-        1.0f, 1.0f
+        0.0f, 1.0f,     // 左上
+        0.0f, 0.0f,     // 左下
+        1.0f, 0.0f,     // 右下
+        1.0f, 1.0f      // 右上
     };
 
     vbo.create();
@@ -78,18 +85,14 @@ void CustomOpenGLWidget::initializeGL()
     program->setAttributeBuffer(TEXTUREIN, GL_FLOAT, 8 * sizeof(GLfloat), 2, 2 * sizeof(GLfloat));
 
     textureUniformY = program->uniformLocation("tex_y");
-    textureUniformU = program->uniformLocation("tex_u");
-    textureUniformV = program->uniformLocation("tex_v");
+    textureUniformUV = program->uniformLocation("tex_uv");
 
     textureY = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    textureU = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    textureV = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    textureUV = new QOpenGLTexture(QOpenGLTexture::Target2D);
     textureY->create();
-    textureU->create();
-    textureV->create();
+    textureUV->create();
     idY = textureY->textureId();
-    idU = textureU->textureId();
-    idV = textureV->textureId();
+    idUV = textureUV->textureId();
     glClearColor(0.0, 0.0, 0.0, 0.0);
 }
 
@@ -111,24 +114,16 @@ void CustomOpenGLWidget::paintGL()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, idU);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, videoWidth >> 1, videoHeight >> 1, 0, GL_RED, GL_UNSIGNED_BYTE, yuvData->data[1]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, idV);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, videoWidth >> 1, videoHeight >> 1, 0, GL_RED, GL_UNSIGNED_BYTE, yuvData->data[2]);
+    glBindTexture(GL_TEXTURE_2D, idUV);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG, videoWidth >> 1, videoHeight >> 1, 0, GL_RG, GL_UNSIGNED_BYTE, yuvData->data[1]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     glUniform1i(textureUniformY, 0);
-    glUniform1i(textureUniformU, 1);
-    glUniform1i(textureUniformV, 2);
+    glUniform1i(textureUniformUV, 1);
+
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
     yuvData.reset();

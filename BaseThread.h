@@ -1,12 +1,21 @@
 #ifndef BASETHREAD_H
 #define BASETHREAD_H
 
+#include <QObject>
 #include <thread>
 #include <atomic>
 
-class BaseThread
+class BaseThread : public QObject
 {
 public:
+    enum THREAD_STATE {
+        UNINIT,
+        RUNNING,
+        PAUSED,
+        STOPPED,
+        FINISHED
+    };
+
     BaseThread();
     virtual ~BaseThread();
 
@@ -15,14 +24,11 @@ public:
     void stop();
     void pause();
     void resume();
+    bool isFinished() const;
+    bool isPaused() const;
+    bool isRunning() const;
 
 protected:
-    enum THREAD_STATE {
-        UNINIT,
-        RUNNING,
-        PAUSED,
-        STOPPED
-    };
     std::thread m_thread;
     std::atomic<THREAD_STATE> m_state;
 };

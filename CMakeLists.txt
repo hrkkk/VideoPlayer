@@ -36,7 +36,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         ${PROJECT_SOURCES}
         PlayerContext.h PlayerContext.cpp
         Player.h Player.cpp
-        AudioPlayer.h AudioPlayer.cpp
+        AudioPlayThread.h AudioPlayThread.cpp
         DemuxThread.h DemuxThread.cpp
         VideoDecodeThread.h VideoDecodeThread.cpp
         AudioDecodeThread.h AudioDecodeThread.cpp
@@ -45,6 +45,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         res.qrc
         Utils.h Utils.cpp
         CustomOpenGLWidget.h CustomOpenGLWidget.cpp
+        VideoPlayThread.h VideoPlayThread.cpp
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET VideoPlayer APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -64,7 +65,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(VideoPlayer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets avcodec avdevice avfilter avformat avutil swresample swscale SDL2)
+target_link_libraries(VideoPlayer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets avcodec avdevice avfilter avformat avutil swresample swscale SDL2.lib)
 target_link_libraries(VideoPlayer PRIVATE Qt6::OpenGLWidgets)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

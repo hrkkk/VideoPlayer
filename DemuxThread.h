@@ -6,7 +6,7 @@
 #include "PlayerContext.h"
 #include "BaseThread.h"
 
-extern std::mutex mtx;
+extern std::mutex demuxMutex;
 extern std::condition_variable cond;
 extern std::atomic<int> totalPackets;
 extern std::atomic<int> videoPackets;

@@ -10,10 +10,11 @@
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 using AVFramePtr = std::shared_ptr<AVFrame>;
 
-extern std::mutex mtx;
+extern std::mutex demuxMutex;
+extern std::mutex videoMutex;
 extern std::condition_variable cond;
 extern std::atomic<int> videoFrames;
-extern std::queue<AVFramePtr> displayQueue;
+extern std::queue<AVFramePtr> videoFrameQueue;
 
 
 class VideoDecodeThread : public BaseThread

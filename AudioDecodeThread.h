@@ -9,10 +9,11 @@
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 using AVFramePtr = std::shared_ptr<AVFrame>;
 
-extern std::mutex mtx;
+extern std::mutex demuxMutex;
+extern std::mutex audioMutex;
 extern std::condition_variable cond;
 extern std::atomic<int> audioFrames;
-extern std::queue<AVFramePtr> playQueue;
+extern std::queue<AVFramePtr> audioFrameQueue;
 
 class AudioDecodeThread : public BaseThread
 {

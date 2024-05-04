@@ -2,7 +2,10 @@
 
 PlayerContext::PlayerContext() {}
 
-PlayerContext::~PlayerContext() {}
+PlayerContext::~PlayerContext()
+{
+    Log("Player context destroyed.");
+}
 
 void PlayerContext::setFilename(const std::string& filename)
 {

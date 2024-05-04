@@ -5,6 +5,7 @@
 #include <QMenu>
 #include "PlayerContext.h"
 
+
 using AVFramePtr = std::shared_ptr<AVFrame>;
 
 QT_BEGIN_NAMESPACE
@@ -22,11 +23,12 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-signals:
-    void sig_showImage(AVFramePtr ptr, uint width, uint height);
+
 
 private:
     void initMenu();
+    void startWork(const QString& fileName);
+    void stopWork();
 
 private:
     Ui::MainWindow *ui;

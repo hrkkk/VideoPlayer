@@ -1,6 +1,5 @@
 #include "DemuxThread.h"
 
-#include <iostream>
 
 DemuxThread::DemuxThread(PlayerContext* playerCtx) : m_playerCtx(playerCtx)
 {}
@@ -11,13 +10,14 @@ DemuxThread::~DemuxThread()
 void DemuxThread::task()
 {
     demux();
+    Log("Demux thread exit.");
+    m_state = THREAD_STATE::FINISHED;
 }
 
 void DemuxThread::demux()
 {
     while (true) {       
         if (m_state == THREAD_STATE::STOPPED) {
-            std::cout << "Get packet thread exit." << std::endl;
             break;
         }
 
@@ -25,7 +25,7 @@ void DemuxThread::demux()
             continue;
         }
 
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::mutex> videoLock(demuxMutex);
 
         if (m_playerCtx->m_audioQueue.size() >= 100 && m_playerCtx->m_videoQueue.size() >= 100) {
             continue;
@@ -59,6 +59,7 @@ void DemuxThread::demux()
 
         totalPackets.fetch_add(1);
 
+        // 判断是视频包还是音频包
         if (packet->stream_index == m_playerCtx->m_videoStreamIndex) {
             {
                 // 添加到视频包队列
@@ -89,8 +90,6 @@ void DemuxThread::demux()
             av_packet_unref(packet.get());
         }
     }
-
-
 
     return;
 }

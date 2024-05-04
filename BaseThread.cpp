@@ -30,7 +30,20 @@ void BaseThread::resume()
     m_state = THREAD_STATE::RUNNING;
 }
 
-void BaseThread::task()
+bool BaseThread::isFinished() const
 {
-
+    return m_state == THREAD_STATE::FINISHED;
 }
+
+bool BaseThread::isPaused() const
+{
+    return m_state == THREAD_STATE::PAUSED;
+}
+
+bool BaseThread::isRunning() const
+{
+    return m_state == THREAD_STATE::RUNNING;
+}
+
+void BaseThread::task()
+{}

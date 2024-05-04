@@ -61,7 +61,7 @@ void CustomProgressBar::mouseMoveEvent(QMouseEvent *ev)
 void CustomProgressBar::mouseReleaseEvent(QMouseEvent *ev)
 {
     double pos = (double)ev->pos().x() / (double)width();
-    emit sigCustomSliderValueChanged(pos);
+    emit sign_sliderValueChanged(pos);
 }
 
 void CustomProgressBar::paintEvent(QPaintEvent *e)
