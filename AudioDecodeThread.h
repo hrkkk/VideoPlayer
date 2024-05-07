@@ -23,7 +23,8 @@ public:
 
     void task() override;
 
-    void decode();
+    void decodeLoop();
+    void decodeOnePacket(AVCodecContext* codecCtx, AVFrame* frame);
 
 private:
     PlayerContext* m_playerCtx;

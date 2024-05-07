@@ -46,6 +46,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         Utils.h Utils.cpp
         CustomOpenGLWidget.h CustomOpenGLWidget.cpp
         VideoPlayThread.h VideoPlayThread.cpp
+        FileAnalyse.h FileAnalyse.cpp
+        InfoDialog.h InfoDialog.cpp InfoDialog.ui
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET VideoPlayer APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR

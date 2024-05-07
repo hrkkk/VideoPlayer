@@ -8,6 +8,9 @@ class Utils
 {
 public:
     Utils();
+
+    static std::string timeFormat(int64_t seconds);
+    static std::string byteFormat(int64_t bytes);
 };
 
 void Log(const std::string& msg);

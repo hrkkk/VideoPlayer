@@ -61,6 +61,7 @@ std::atomic<int> videoFrames(0);
 std::atomic<int> audioFrames(0);
 std::atomic<bool> stopFlag(false);
 
+std::atomic<bool> isMute(false);
 
 
 
@@ -88,9 +89,11 @@ void MainWindow::startWork(const QString& fileName)
 
         // 分析文件，在 UI 界面上填写文件相关信息
         analyzeFile();
-        // ui->treeWidget->setHeaderLabel(fileName);
-        // QTreeWidgetItem* item = new QTreeWidgetItem(ui->treeWidget, QStringList() << "General");
-        // QTreeWidgetItem* child1 = new QTreeWidgetItem(item, QStringList() << "Complete name");
+
+        if (m_infoDialog != nullptr) {
+            m_infoDialog->setFileInfo(playerCtx);
+        }
+
         // 总时长
         // 将毫秒转化为时间
         int hours = totalDuration / (60 * 60);
@@ -98,154 +101,46 @@ void MainWindow::startWork(const QString& fileName)
         int seconds = ((totalDuration % (60 * 60)) % 60);
         ui->duration->setText(QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0')));
 
+
         // 启动线程，开始播放
         // 启动解封装线程
         demuxThread = new DemuxThread(playerCtx);
         demuxThread->start();
 
-        // 启动视频解码线程
-        videoDecodeThread = new VideoDecodeThread(playerCtx);
-        videoDecodeThread->start();
+        // 如果有视频流
+        if (playerCtx->m_streamSet.contains(AVMEDIA_TYPE_VIDEO)) {
+            // 启动视频解码线程
+            videoDecodeThread = new VideoDecodeThread(playerCtx);
+            videoDecodeThread->start();
 
-        // 启动音频解码线程
-        audioDecodeThread = new AudioDecodeThread(playerCtx);
-        audioDecodeThread->start();
+            // 启动视频播放线程
+            videoPlayThread = new VideoPlayThread(playerCtx);
+            connect(videoPlayThread, &VideoPlayThread::sig_showImage, ui->openGLWidget, &CustomOpenGLWidget::slot_showYUV);
+            connect(videoPlayThread, &VideoPlayThread::sig_currPTS, ui->progressBar, [this](int pts) {
+                // 将毫秒转化为时间
+                int hours = pts / (60 * 60);
+                int minutes = (pts % (60 * 60)) / 60;
+                int seconds = ((pts % (60 * 60)) % 60);
+                ui->pts->setText(QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0')));
+                // 调整进度条
+                double pos = static_cast<double>(pts) / totalDuration;
+                ui->progressBar->slotSetValue(pos);
+            });
+            videoPlayThread->start();
+            ui->btn_pause->setIcon(QIcon(":/resource/pause.png"));
+        }
 
-        // 启动音频播放线程
-        audioPlayThread = new AudioPlayThread(playerCtx);
-        // audioPlayerThread->setVolume(ui->volume->getPos());
-        audioPlayThread->start();
+        // 如果有音频流
+        if (playerCtx->m_streamSet.contains(AVMEDIA_TYPE_AUDIO)) {
+            // 启动音频解码线程
+            audioDecodeThread = new AudioDecodeThread(playerCtx);
+            audioDecodeThread->start();
 
-        // 启动视频播放线程
-        videoPlayThread = new VideoPlayThread(playerCtx);
-        connect(videoPlayThread, &VideoPlayThread::sig_showImage, ui->openGLWidget, &CustomOpenGLWidget::slot_showYUV);
-        connect(videoPlayThread, &VideoPlayThread::sig_currPTS, ui->progressBar, [this](int pts) {
-            // 将毫秒转化为时间
-            int hours = pts / (60 * 60);
-            int minutes = (pts % (60 * 60)) / 60;
-            int seconds = ((pts % (60 * 60)) % 60);
-            ui->pts->setText(QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0')));
-            // 调整进度条
-            double pos = static_cast<double>(pts) / totalDuration;
-            ui->progressBar->slotSetValue(pos);
-        });
-        videoPlayThread->start();
-
-        // // 启动视频播放时钟
-        // videoPlayTimer = new QTimer(this);
-        // connect(videoPlayTimer, &QTimer::timeout, this, [&]() {
-        //     std::lock_guard<std::mutex> lock(mtx);
-
-        //     ui->totalPackets->setText(QString::number(totalPackets));
-        //     ui->videoPackets->setText(QString::number(videoPackets));
-
-        //     ui->audioPackets->setText(QString::number(audioPackets));
-        //     ui->videoFrames->setText(QString::number(videoFrames));
-        //     ui->audioFrames->setText(QString::number(audioFrames));
-        //     ui->displayFrames->setText(QString::number(displayCount));
-        //     ui->playFrames->setText(QString::number(playCount));
-
-        //     if (playerCtx->m_isPaused) {
-        //         return;
-        //     }
-
-        //     // 如果有待播放的视频帧
-        //     if (!displayQueue.empty()) {
-
-        //         // 取出图像
-        //         AVFramePtr frame = displayQueue.front();
-        //         displayQueue.pop();
-
-        //         // 音视频同步
-        //         // double currentPts = frame->pts;
-        //         // double sec = currentPts * av_q2d(playerCtx->m_formatCtx->streams[playerCtx->m_videoStreamIndex]->time_base);   // 将时间戳转换为以秒为单位
-        //         // Log(std::to_string(currentPts));
-        //         // double delay = currentPts - playerCtx->m_frameLastPts;
-        //         // if (delay <= 0 || delay >= 10.0) {
-        //         //     delay = playerCtx->m_frameLastDelay;
-        //         // }
-        //         // playerCtx->m_frameLastDelay = delay;
-        //         // playerCtx->m_frameLastPts = currentPts;
-
-        //         // double refClock = audioClock;   // 获取音频时钟
-        //         // double diff = sec - refClock;
-
-        //         // const double AV_SYNC_THRESHOLD = 0.01;
-        //         // const double AV_NOSYNC_THRESHOLD = 10.0;
-        //         // double syncThreshold = (delay > AV_SYNC_THRESHOLD) ? delay : AV_SYNC_THRESHOLD;
-
-        //         // if (fabs(diff) < AV_NOSYNC_THRESHOLD) {
-        //         //     if (diff < -syncThreshold) {
-        //         //         delay = 0;
-        //         //     } else if (diff >= syncThreshold) {
-        //         //         delay = 2 * delay;
-        //         //     }
-        //         // }
-
-        //         // playerCtx->m_frameTimer += delay;
-        //         // double actualDelay = playerCtx->m_frameTimer - (av_gettime() / AV_TIME_BASE);
-        //         // if (actualDelay < 0.010) {
-        //         //     actualDelay = 0.010;
-        //         // }
-
-        //         // 音视频同步
-        //         videoClock = av_q2d(playerCtx->m_videoCodecCtx->time_base) * playerCtx->m_videoCodecCtx->ticks_per_frame
-        //                      * 1000 * playerCtx->m_videoCodecCtx->frame_num;
-        //         double duration = av_q2d(playerCtx->m_videoCodecCtx->time_base) * playerCtx->m_videoCodecCtx->ticks_per_frame * 1000;
-
-        //         // 显示当前帧
-        //         // qDebug() << "Display frame " << displayCount;
-        //         // 将 Frame 发送到 GPU 进行渲染
-        //         emit sig_showImage(frame, playerCtx->m_videoCodecCtx->width, playerCtx->m_videoCodecCtx->height);
-
-        //         // 计算下一帧的显示时间
-        //         double delay = duration;
-        //         double diff = videoClock - audioClock;
-        //         if (fabs(diff) <= duration) {
-        //             delay = duration;
-        //         } else if (diff > duration) {
-        //             delay *= 2;
-        //         } else if (diff < -duration) {
-        //             delay = 0;
-        //         }
-
-        //         // 延迟delay
-
-
-        //         // // 使用滤镜处理Frame
-        //         // int ret = av_buffersrc_add_frame(playerCtx->m_bufferSrcCtx, frame.get());
-        //         // if (ret < 0) {
-        //         //     std::cout << "add frame error.\n";
-        //         // }
-        //         // AVFrame* filtFrame = av_frame_alloc();
-        //         // ret = av_buffersink_get_frame(playerCtx->m_bufferSinkCtx, filtFrame);
-        //         // if (ret < 0) {
-        //         //     std::cout << "get frame error.\n";
-        //         // }
-
-
-
-
-        //         // // 将 AVFrame 转换为 QImage
-        //         // QImage image(frame->data[0], frame->width, frame->height, frame->linesize[0], QImage::Format_RGB888);
-        //         // // av_frame_free(&filtFrame);
-
-        //         // // 将 QImage 设置为QLabel的图像
-        //         // QPixmap pixmap = QPixmap::fromImage(image);
-        //         // ui->screen->setPixmap(pixmap.scaled(ui->screen->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-
-        //         displayCount.fetch_add(1);
-
-        //         double playProgress = static_cast<double>(displayCount * 1.0 / totalFrames);
-        //         double cacheProgress = static_cast<double>((displayCount + displayQueue.size()) * 1.0 / totalFrames);
-        //         ui->progressBar->slotSetValue(playProgress, cacheProgress);
-
-        //         // std::cout << "DisplayCount: " << displayCount << std::endl;
-        //         // std::cout << "Display one frame" << std::endl;
-        //     }
-        // });
-        // videoPlayTimer->setInterval(40);
-        // videoPlayTimer->start();
+            // 启动音频播放线程
+            audioPlayThread = new AudioPlayThread(playerCtx);
+            // audioPlayerThread->setVolume(ui->volume->getPos());
+            audioPlayThread->start();
+        }
     }
 }
 
@@ -254,41 +149,35 @@ void MainWindow::stopWork()
     // 停止所有线程，释放所有资源
     if (audioPlayThread != nullptr) {
         audioPlayThread->stop();
-        while (!audioPlayThread->isFinished()) ;
+        while (!audioPlayThread->isExited()) ;
         delete audioPlayThread;
         audioPlayThread = nullptr;
     }
 
-    // if (videoPlayTimer != nullptr) {
-    //     videoPlayTimer->stop();
-    //     delete videoPlayTimer;
-    //     videoPlayTimer = nullptr;
-    // }
-
     if (videoPlayThread != nullptr) {
         videoPlayThread->stop();
-        while (!videoPlayThread->isFinished()) ;
+        while (!videoPlayThread->isExited()) ;
         delete videoPlayThread;
         videoPlayThread = nullptr;
     }
 
     if (audioDecodeThread != nullptr) {
         audioDecodeThread->stop();
-        while (!audioDecodeThread->isFinished()) ;
+        while (!audioDecodeThread->isExited()) ;
         delete audioDecodeThread;
         audioDecodeThread = nullptr;
     }
 
     if (videoDecodeThread != nullptr) {
         videoDecodeThread->stop();
-        while (!videoDecodeThread->isFinished()) ;
+        while (!videoDecodeThread->isExited()) ;
         delete videoDecodeThread;
         videoDecodeThread = nullptr;
     }
 
     if (demuxThread != nullptr) {
         demuxThread->stop();
-        while (!demuxThread->isFinished()) ;
+        while (!demuxThread->isExited()) ;
         delete demuxThread;
         demuxThread = nullptr;
     }
@@ -316,12 +205,15 @@ void MainWindow::stopWork()
     audioFrames = 0;
 
     // 复原 UI 界面
-
+    if (m_infoDialog != nullptr) {
+        m_infoDialog->clearFileInfo();
+    }
 }
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , m_infoDialog(new InfoDialog(this))
 {
     ui->setupUi(this);
 
@@ -341,13 +233,8 @@ MainWindow::MainWindow(QWidget *parent)
         this->close();
     });
 
-    ui->infoArea->hide();
     connect(ui->btn_more, &QPushButton::clicked, this, [this]() {
-        if (ui->infoArea->isHidden()) {
-            ui->infoArea->show();
-        } else {
-            ui->infoArea->hide();
-        }
+        m_infoDialog->show();
     });
 
     // 设置音量
@@ -363,6 +250,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 
     connect(ui->btn_pause, &QPushButton::clicked, this, [this]() {
+        if (playerCtx == nullptr) {
+            return;
+        }
         playerCtx->m_isPaused = !playerCtx->m_isPaused;
 
         if (videoPlayThread != nullptr) {
@@ -423,8 +313,17 @@ MainWindow::MainWindow(QWidget *parent)
     // });
 
     initMenu();
-    connect(ui->btn_setting, &QPushButton::clicked, this, [this]() {
+    connect(ui->btn_setting, &QPushButton::clicked, this, []() {
 
+    });
+
+    connect(ui->btn_mute, &QPushButton::clicked, this, [this]() {
+        isMute = !isMute;
+        if (isMute) {
+            ui->btn_mute->setIcon(QIcon(":/resource/mute.png"));
+        } else {
+            ui->btn_mute->setIcon(QIcon(":/resource/volume.png"));
+        }
     });
 
     connect(ui->openGLWidget, &CustomOpenGLWidget::sign_mouseClicked, this, [this](int x, int y) {
@@ -506,6 +405,14 @@ void MainWindow::initMenu()
     m_menu->addMenu(imgFlipMenu);
 }
 
+void MainWindow::initFileTree()
+{
+    FileInfo fileInfo = playerCtx->m_fileInfo;
+
+
+
+
+}
 
 AVPixelFormat getHwFmtCallback(AVCodecContext* ctx, const AVPixelFormat* pixFmt)
 {
@@ -590,7 +497,7 @@ int openStream(PlayerContext* playerCtx, int mediaType)
     // 得到最好的一个流（FFmpeg根据历史经验确定何为最好）对应的解码器
     int streamIndex = av_find_best_stream(formatCtx, (AVMediaType)mediaType, -1, -1, (const AVCodec**)&codec, 0);
     if (streamIndex < 0 || streamIndex >= (int)formatCtx->nb_streams) {
-        std::cout << "Can not find a audio stream in the input file\n";
+        std::cout << "Can not find a best stream in the input file\n";
         return -1;
     }
 
@@ -645,6 +552,16 @@ int openStream(PlayerContext* playerCtx, int mediaType)
 
     switch (codecCtx->codec_type) {
     case AVMEDIA_TYPE_AUDIO:
+        // 填充信息
+        playerCtx->m_fileInfo.audioCodecName = codecCtx->codec->name;
+        playerCtx->m_fileInfo.audioCodecFullName = codecCtx->codec->long_name;
+        playerCtx->m_fileInfo.audioDuration = formatCtx->streams[streamIndex]->duration * av_q2d(formatCtx->streams[streamIndex]->time_base);
+        playerCtx->m_fileInfo.sampleRate = formatCtx->streams[streamIndex]->codecpar->sample_rate;
+        playerCtx->m_fileInfo.channels = formatCtx->streams[streamIndex]->codecpar->ch_layout.nb_channels;
+        playerCtx->m_fileInfo.sampleDepth = formatCtx->streams[streamIndex]->codecpar->bits_per_raw_sample;
+        playerCtx->m_fileInfo.audioStreamSize = 0;
+
+        // 设置参数
         playerCtx->m_audioStreamIndex = streamIndex;
         playerCtx->m_audioCodecCtx = codecCtx;
         playerCtx->m_audioStream = formatCtx->streams[streamIndex];
@@ -660,6 +577,22 @@ int openStream(PlayerContext* playerCtx, int mediaType)
         swr_init(playerCtx->m_audioSwrCtx);
         break;
     case AVMEDIA_TYPE_VIDEO:
+
+        // 填充信息
+        playerCtx->m_fileInfo.videoCodecName = codecCtx->codec->name;
+        playerCtx->m_fileInfo.videoCodecFullName = codecCtx->codec->long_name;
+        playerCtx->m_fileInfo.videoDuration = formatCtx->streams[streamIndex]->duration * av_q2d(formatCtx->streams[streamIndex]->time_base);
+        playerCtx->m_fileInfo.width = formatCtx->streams[streamIndex]->codecpar->width;
+        playerCtx->m_fileInfo.height = formatCtx->streams[streamIndex]->codecpar->height;
+        playerCtx->m_fileInfo.aspectRatio[0] = 0;
+        playerCtx->m_fileInfo.aspectRatio[1] = 0;
+        playerCtx->m_fileInfo.pixelDepth = formatCtx->streams[streamIndex]->codecpar->bits_per_raw_sample;
+        playerCtx->m_fileInfo.colorSpace = "";
+        playerCtx->m_fileInfo.chromaSubsampling = "";
+        playerCtx->m_fileInfo.frameRate = 0;
+        playerCtx->m_fileInfo.videoStreamSize = 0;
+
+        // 设置参数
         playerCtx->m_videoStreamIndex = streamIndex;
         playerCtx->m_videoCodecCtx = codecCtx;
         playerCtx->m_videoStream = formatCtx->streams[streamIndex];
@@ -690,27 +623,45 @@ void analyzeFile()
 
     playerCtx->m_formatCtx = formatCtx;
 
+
     if (avformat_find_stream_info(formatCtx, NULL) < 0) {
         Log("Can not find stream information");
         return;
+    }
+
+    // 填充文件信息
+    playerCtx->m_fileInfo.filename = playerCtx->m_filename;
+    playerCtx->m_fileInfo.fileSize = avio_size(formatCtx->pb);
+    playerCtx->m_fileInfo.duration = formatCtx->duration / AV_TIME_BASE;
+    playerCtx->m_fileInfo.streamNum = formatCtx->nb_streams;
+    playerCtx->m_fileInfo.formatName = formatCtx->iformat->name;
+    playerCtx->m_fileInfo.formatFullName = formatCtx->iformat->long_name;
+
+    for (unsigned int i = 0; i < formatCtx->nb_streams; ++i) {
+        AVStream* stream = formatCtx->streams[i];
+        AVMediaType type = stream->codecpar->codec_type;
+        playerCtx->m_streamSet.insert(type);
     }
 
     // 获取视频总时长
     int64_t duration = playerCtx->m_formatCtx->duration;
     totalDuration = duration / AV_TIME_BASE;
 
-    if (openStream(playerCtx, AVMEDIA_TYPE_AUDIO) < 0) {
-        std::cout << "Open audio stream failed.\r\n";
-        return;
+    if (playerCtx->m_streamSet.contains(AVMEDIA_TYPE_AUDIO)) {
+        if (openStream(playerCtx, AVMEDIA_TYPE_AUDIO) < 0) {
+            std::cout << "Open audio stream failed.\r\n";
+        }
     }
 
-    if (openStream(playerCtx, AVMEDIA_TYPE_VIDEO) < 0) {
-        std::cout << "Open video stream failed.\r\n";
-        return;
+    if (playerCtx->m_streamSet.contains(AVMEDIA_TYPE_VIDEO)) {
+        if (openStream(playerCtx, AVMEDIA_TYPE_VIDEO) < 0) {
+            std::cout << "Open video stream failed.\r\n";
+        }
     }
 
     initFilter(playerCtx);
 
     totalFrames = playerCtx->m_formatCtx->streams[playerCtx->m_videoStreamIndex]->nb_frames;
     // std::cout << totalFrames << std::endl;
+
 }

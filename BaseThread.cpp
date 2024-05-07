@@ -8,26 +8,48 @@ BaseThread::~BaseThread()
 
 void BaseThread::start()
 {
-    m_thread = std::thread([this]() {
-        task();
-    });
-    m_state = THREAD_STATE::RUNNING;
-    m_thread.detach();
-}
-
-void BaseThread::stop()
-{
-    m_state = THREAD_STATE::STOPPED;
+    if (m_state == THREAD_STATE::UNINIT) {
+        m_thread = std::thread([this]() {
+            task();
+        });
+        m_thread.detach();
+        m_state = THREAD_STATE::RUNNING;
+    }
 }
 
 void BaseThread::pause()
 {
-    m_state = THREAD_STATE::PAUSED;
+    if (m_state == THREAD_STATE::RUNNING) {
+        m_state = THREAD_STATE::PAUSED;
+    }
 }
 
 void BaseThread::resume()
 {
-    m_state = THREAD_STATE::RUNNING;
+    if (m_state == THREAD_STATE::PAUSED) {
+        m_state = THREAD_STATE::RUNNING;
+    }
+}
+
+void BaseThread::finish()
+{
+    if (m_state == THREAD_STATE::RUNNING || m_state == THREAD_STATE::PAUSED) {
+        m_state = THREAD_STATE::FINISHED;
+    }
+}
+
+void BaseThread::stop()
+{
+    if (m_state == THREAD_STATE::RUNNING || m_state == THREAD_STATE::PAUSED || m_state == THREAD_STATE::FINISHED) {
+        m_state = THREAD_STATE::STOPPED;
+    }
+}
+
+void BaseThread::exit()
+{
+    if (m_state == THREAD_STATE::STOPPED) {
+        m_state = THREAD_STATE::EXITED;
+    }
 }
 
 bool BaseThread::isFinished() const
@@ -43,6 +65,16 @@ bool BaseThread::isPaused() const
 bool BaseThread::isRunning() const
 {
     return m_state == THREAD_STATE::RUNNING;
+}
+
+bool BaseThread::isStopped() const
+{
+    return m_state == THREAD_STATE::STOPPED;
+}
+
+bool BaseThread::isExited() const
+{
+    return m_state == THREAD_STATE::EXITED;
 }
 
 void BaseThread::task()

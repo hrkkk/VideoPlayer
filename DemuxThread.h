@@ -20,7 +20,8 @@ public:
 
     void task() override;
 
-    void demux();
+    void demuxLoop();
+    void demuxOnePacket();
 
 private:
     PlayerContext* m_playerCtx;

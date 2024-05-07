@@ -4,7 +4,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include "PlayerContext.h"
-
+#include "InfoDialog.h"
 
 using AVFramePtr = std::shared_ptr<AVFrame>;
 
@@ -23,15 +23,15 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-
-
 private:
     void initMenu();
+    void initFileTree();
     void startWork(const QString& fileName);
     void stopWork();
 
 private:
     Ui::MainWindow *ui;
+    InfoDialog* m_infoDialog;
     QMenu* m_menu;
 };
 #endif // MAINWINDOW_H

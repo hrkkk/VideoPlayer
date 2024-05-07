@@ -12,5 +12,8 @@
         <file>resource/exit.png</file>
         <file>resource/max.png</file>
         <file>resource/min.png</file>
+        <file>resource/mute.png</file>
+        <file>resource/exitFull.png</file>
+        <file>resource/logo.png</file>
     </qresource>
 </RCC>

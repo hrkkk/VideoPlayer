@@ -17,6 +17,7 @@ extern std::mutex audioMutex;
 extern std::queue<AVFramePtr> audioFrameQueue;
 extern std::atomic<int> playCount;
 extern std::atomic<double> audioClock;
+extern std::atomic<bool> isMute;
 
 class AudioPlayThread : public BaseThread {
 public:

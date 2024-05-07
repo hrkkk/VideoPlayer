@@ -24,7 +24,8 @@ public:
     VideoPlayThread(PlayerContext* playerCtx);
 
     void task() override;
-    void displayVideo();
+    void displayLoop();
+    void displayOneFrame();
 
 signals:
     void sig_showImage(AVFramePtr ptr, uint width, uint height);

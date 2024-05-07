@@ -15,6 +15,7 @@ extern "C" {
 #include <queue>
 #include <memory>
 #include <atomic>
+#include <set>
 #include "Utils.h"
 
 
@@ -23,25 +24,37 @@ extern "C" {
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 
 struct FileInfo {
-    std::string filename;
-    int64_t fileSize;
-
-    int64_t mediaDuration;
+    // 文件信息
+    std::string filename;       // 文件名
+    int64_t fileSize;           // 文件大小(B)
+    int64_t duration;      // 媒体时长(S)
+    float bitRate;              // 比特率
+    std::string formatName;         // 封装格式
+    std::string formatFullName;     // 封装格式全名
+    int streamNum;              // 流个数
+    std::string metadata;       // 元数据
 
     // 视频数据
+    std::string videoCodecName;      // 编码器名称
+    std::string videoCodecFullName;      // 编码器全名
     int64_t videoDuration;      // 视频时长
     int width;      // 帧宽
     int height;     // 帧高
-    int aspectRatio;    // 比例
-    int bitDepth;       // 位深
-    int colorSpace;     // 色彩空间
-    int chromaSubsampling;      // 色度下采样
+    int aspectRatio[2];    // 显示比例
+    int pixelDepth;       // 位深
+    std::string colorSpace;     // 色彩空间
+    std::string chromaSubsampling;      // 色度下采样
     double frameRate;   // 帧率
+    int64_t videoStreamSize;     // 流大小(B)
 
     // 音频数据
+    std::string audioCodecName;     // 编码器名称
+    std::string audioCodecFullName;     // 编码器全名
     int64_t audioDuration;    // 音频时长
     double sampleRate;      // 采样率
     int channels;       // 通道数
+    int sampleDepth;    // 量化位深
+    int64_t audioStreamSize;    // 流大小(B)
 
 };
 
@@ -81,9 +94,12 @@ public:
     void seekToPos(double position);
 
 public:
+    FileInfo m_fileInfo;
     std::string m_filename;
 
     AVFormatContext* m_formatCtx;
+
+    std::set<AVMediaType> m_streamSet;
 
     AVCodecContext* m_videoCodecCtx;
     AVCodecContext* m_audioCodecCtx;
