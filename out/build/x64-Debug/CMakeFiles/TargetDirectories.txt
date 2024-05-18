@@ -1,8 +1,0 @@
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/VideoPlayer.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/edit_cache.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/rebuild_cache.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/list_install_components.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/install.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/install/local.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/VideoPlayer_autogen_timestamp_deps.dir
-C:/Users/hrkkk/Desktop/VideoPlayer/out/build/x64-Debug/CMakeFiles/VideoPlayer_autogen.dir
